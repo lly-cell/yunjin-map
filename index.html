@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>南京云锦文化数字研学地图 (非遗特别版)</title>
+    <!-- Leaflet & FontAwesome -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- 引入 Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        /* ==================== 
+           1. 视觉系统 - 云锦皇家配色
+           ==================== */
+        :root { 
+            --primary-red: #A91D32;    /* 云锦红 - 核心场馆 */
+            --primary-gold: #D4AF37;   /* 织金 - 重点装饰 */
+            --secondary-blue: #1E3A8A; /* 官补蓝 - 文化地标 */
+            --bg-texture: #FDFBF7;     /* 米宣纸底色 */
+            --white: #fff; 
+            --shadow: 0 8px 30px rgba(139, 69, 19, 0.15);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; }
+        body { font-family: 'PingFang SC', 'Noto Serif SC', 'Microsoft YaHei', serif; display: flex; height: 100vh; width: 100vw; overflow: hidden; background: var(--bg-texture); }
+        
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: var(--primary-gold); border-radius: 3px; }
+
+        /* ==================== 
+           2. 侧边栏 (Sidebar) 
+           ==================== */
+        .sidebar { 
+            width: 380px; flex-shrink: 0; height: 100%; 
+            background: var(--white); box-shadow: 4px 0 20px rgba(0,0,0,0.05); 
+            z-index: 1000; display: flex; flex-direction: column; 
+            transition: transform 0.3s ease;
+            border-right: 1px solid #E5E7EB;
+        }
+        .header { 
+            padding: 24px; 
+            background: linear-gradient(135deg, var(--primary-red), #800020); 
+            color: var(--primary-gold); 
+            position: relative; overflow: hidden;
+        }
+        /* 增加云纹装饰纹理 */
+        .header::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-image: radial-gradient(circle at 10% 20%, rgba(212, 175, 55, 0.1) 0%, transparent 20%),
+                              radial-gradient(circle at 90% 80%, rgba(212, 175, 55, 0.1) 0%, transparent 20%);
+        }
+        .header h1 { font-size: 22px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-weight: 700; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
+        .header p { font-size: 12px; color: rgba(255,255,255,0.9); font-weight: 300; }
+        
+        /* 下载按钮样式 */
+        .download-btn {
+            position: absolute; top: 24px; right: 24px;
+            width: 32px; height: 32px; border-radius: 50%;
+            background: rgba(255,255,255,0.15); color: var(--primary-gold);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; border: 1px solid rgba(212, 175, 55, 0.4);
+            transition: all 0.2s; z-index: 10;
+        }
+        .download-btn:hover { background: var(--primary-gold); color: var(--primary-red); transform: scale(1.1); }
+        .tooltip { position: absolute; right: 0; top: 40px; background: rgba(0,0,0,0.7); color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 10px; display: none; white-space: nowrap; }
+        .download-btn:hover .tooltip { display: block; }
+
+        /* 研学状态栏 */
+        .status-bar {
+            background: #FFFBF0; padding: 12px 24px; border-bottom: 1px solid #F3E5AB;
+            display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #5C4033;
+        }
+        .status-btn {
+            color: #8B4513; cursor: pointer; font-weight: 600; 
+            background: rgba(212, 175, 55, 0.2); padding: 6px 14px; border-radius: 20px; transition: 0.2s;
+            border: 1px solid rgba(212, 175, 55, 0.3);
+        }
+        .status-btn:hover { background: var(--primary-gold); color: white; }
+
+        /* 筛选区 */
+        .filter-group { padding: 15px 24px 5px; display: flex; gap: 8px; }
+        .filter-btn { 
+            padding: 6px 14px; border: 1px solid #E5E7EB; border-radius: 20px; 
+            background: #fff; cursor: pointer; font-size: 13px; color: #64748B; transition: 0.2s;
+        }
+        .filter-btn.active { background: #333; color: #fff; border-color: #333; }
+        .filter-btn[data-type="museum"].active { background: var(--primary-red); border-color: var(--primary-red); color: var(--primary-gold); }
+        .filter-btn[data-type="culture"].active { background: var(--secondary-blue); border-color: var(--secondary-blue); color: white; }
+
+        /* 列表容器 */
+        .scroll-content { flex: 1; overflow-y: auto; padding: 10px 24px 30px; }
+        .section-title { font-size: 15px; font-weight: 700; color: #8B4513; margin: 25px 0 12px; display: flex; align-items: center; gap: 8px; }
+        .section-title::before { content: ''; width: 4px; height: 16px; background: var(--primary-red); border-radius: 2px; }
+
+        /* 路线卡片 */
+        .route-card { 
+            background: #fff; padding: 16px; margin-bottom: 12px; border-radius: 8px; 
+            cursor: pointer; border: 1px solid #F1F5F9; display: flex; align-items: center; gap: 15px;
+            transition: all 0.2s; position: relative; overflow: hidden;
+        }
+        .route-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(169, 29, 50, 0.08); border-color: #FCD5CE; }
+        .route-card.active-route { background: #FFF5F5; border-color: var(--primary-red); }
+        /* 选中时的金色边框指示 */
+        .route-card.active-route::after {
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--primary-red);
+        }
+        .route-icon { 
+            width: 42px; height: 42px; border-radius: 8px; display: flex; align-items: center; justify-content: center; 
+            color: white; font-size: 18px; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        /* 场馆列表项 */
+        .location-item { 
+            padding: 14px 0; border-bottom: 1px solid #F1F5F9; cursor: pointer; 
+            display: flex; justify-content: space-between; align-items: center; 
+        }
+        .location-item:last-child { border-bottom: none; }
+        .location-item:hover .loc-name { color: var(--primary-red); padding-left: 5px; }
+        .loc-name { font-size: 15px; color: #334155; transition: 0.2s; font-weight: 500; font-family: 'Noto Serif SC', serif; }
+        .loc-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: white; font-weight: bold; }
+
+        /* ==================== 
+           3. 地图区域 & 详情抽屉
+           ==================== */
+        .map-container { flex: 1; position: relative; overflow: hidden; }
+        #map { width: 100%; height: 100%; z-index: 1; }
+
+        /* 详情抽屉 */
+        .detail-panel {
+            position: absolute; top: 12px; right: 12px; bottom: 12px; width: 400px;
+            background: rgba(255, 255, 255, 0.98); backdrop-filter: blur(12px);
+            border-radius: 12px; box-shadow: -5px 0 25px rgba(0,0,0,0.1);
+            z-index: 2000; transform: translateX(120%); transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+            display: flex; flex-direction: column; overflow: hidden; border: 1px solid #fff;
+        }
+        .detail-panel.active { transform: translateX(0); }
+
+        .detail-hero { height: 200px; position: relative; }
+        .detail-hero img { width: 100%; height: 100%; object-fit: cover; }
+        .close-btn { 
+            position: absolute; top: 15px; right: 15px; width: 32px; height: 32px;
+            background: rgba(0,0,0,0.6); color: var(--primary-gold); border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+            backdrop-filter: blur(4px); transition: 0.2s;
+        }
+        .close-btn:hover { background: var(--primary-red); color: white; transform: rotate(90deg); }
+
+        .detail-content { flex: 1; overflow-y: auto; padding: 24px; background: linear-gradient(to bottom, #fff 0%, #FFFEFA 100%); }
+        
+        .title-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .detail-title { font-size: 24px; font-weight: 800; color: #1E293B; line-height: 1.2; font-family: 'Noto Serif SC', serif; }
+        
+        /* 语音按钮 */
+        .audio-btn {
+            background: #FDF2F8; color: var(--primary-red); border: 1px solid #FBCFE8;
+            width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; font-size: 16px;
+            transition: 0.2s;
+        }
+        .audio-btn.playing { background: var(--primary-red); color: var(--primary-gold); animation: pulse 1.5s infinite; border-color: var(--primary-red); }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(169, 29, 50, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(169, 29, 50, 0); } 100% { box-shadow: 0 0 0 0 rgba(169, 29, 50, 0); } }
+
+        .detail-meta { display: flex; gap: 12px; font-size: 12px; color: #64748B; margin-bottom: 20px; flex-wrap: wrap; }
+        .meta-tag { background: #fff; padding: 4px 10px; border-radius: 20px; border: 1px solid #E2E8F0; display: flex; align-items: center; gap: 5px; color: #555; }
+
+        .detail-desc { font-size: 15px; line-height: 1.8; color: #444; margin-bottom: 24px; text-align: justify; letter-spacing: 0.5px; }
+
+        /* 知识问答卡片 - 卷轴风格 */
+        .quiz-card {
+            background: #FFFBEB; border: 1px solid #FCD34D;
+            border-radius: 8px; padding: 18px; margin-bottom: 24px; position: relative;
+            box-shadow: 0 2px 8px rgba(212, 175, 55, 0.1);
+        }
+        .quiz-title { font-size: 15px; font-weight: bold; color: #92400E; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .quiz-options { display: flex; flex-direction: column; gap: 10px; }
+        .quiz-opt {
+            background: white; border: 1px solid #FDE68A; padding: 10px 14px; border-radius: 6px;
+            font-size: 14px; cursor: pointer; transition: 0.2s; color: #78350F;
+        }
+        .quiz-opt:hover { background: #FEF3C7; border-color: #F59E0B; }
+        .quiz-opt.correct { background: #059669; color: white; border-color: #059669; }
+        .quiz-opt.wrong { background: #DC2626; color: white; border-color: #DC2626; }
+
+        .chart-box { height: 200px; width: 100%; margin-bottom: 10px; }
+
+        /* 底部操作 */
+        .detail-actions {
+            padding: 16px 24px; border-top: 1px solid #F1F5F9; background: #fff;
+            display: flex; gap: 12px;
+        }
+        .action-btn {
+            flex: 1; padding: 12px; border-radius: 6px; text-align: center; cursor: pointer; 
+            font-size: 14px; font-weight: 600; text-decoration: none; 
+            display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; border: none;
+        }
+        .btn-add { background: white; border: 1px solid #CBD5E1; color: #475569; }
+        .btn-add:hover { background: #F8FAFC; border-color: #94A3B8; }
+        .btn-add.added { background: #059669; color: white; border-color: #059669; }
+        .btn-nav { background: var(--primary-red); color: white !important; box-shadow: 0 4px 12px rgba(169, 29, 50, 0.3); }
+        .btn-nav:hover { background: #881324; transform: translateY(-2px); }
+
+        /* 弹窗样式 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+            z-index: 5000; display: none; justify-content: center; align-items: center;
+        }
+        .modal-box {
+            background: white; width: 450px; border-radius: 16px; padding: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.2); max-height: 85vh; display: flex; flex-direction: column;
+        }
+        .plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; color: #333; }
+        .plan-list { flex: 1; overflow-y: auto; border: 1px solid #F1F5F9; border-radius: 8px; padding: 10px; margin-bottom: 20px; background: #FAFAFA; }
+        .plan-item { 
+            display: flex; justify-content: space-between; align-items: center; padding: 12px; 
+            background: #fff; margin-bottom: 8px; border-radius: 6px; border: 1px solid #E5E7EB;
+        }
+        .route-stats { 
+            background: #FFF1F2; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #FECDD3;
+            font-size: 13px; color: #9F1239; display: none;
+        }
+
+        /* Marker Styles */
+        .custom-marker { 
+            display: flex; justify-content: center; align-items: center; border-radius: 50%; color: white; 
+            border: 2px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.4); transition: transform 0.2s; 
+        }
+        .bg-museum { background: var(--primary-red); }
+        .bg-culture { background: var(--secondary-blue); }
+
+        /* Mobile */
+        .mobile-toggle { display: none; position: absolute; top: 15px; left: 15px; z-index: 3000; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); color: var(--primary-red); }
+        @media (max-width: 768px) {
+            .sidebar { position: absolute; left: -100%; top: 0; width: 85%; height: 100%; z-index: 4000; }
+            .sidebar.open { left: 0; }
+            .mobile-toggle { display: block; }
+            .detail-panel { width: 100%; bottom: 0; top: 25%; right: 0; border-radius: 20px 20px 0 0; transform: translateY(110%); }
+            .detail-panel.active { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">
+        <i class="fas fa-bars"></i>
+    </div>
+
+    <!-- 左侧主控栏 -->
+    <div class="sidebar" id="sidebar">
+        <div class="header">
+            <h1><i class="fas fa-dragon"></i> 南京云锦数字地图</h1>
+            <p>V5.0 | 皇家织造 · 非遗技艺 · 丝绸之路</p>
+            <div class="download-btn" onclick="downloadHTML()" title="下载离线地图">
+                <i class="fas fa-download"></i>
+                <div class="tooltip">点击保存离线网页</div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <span><i class="fas fa-scroll"></i> 研学清单 (<span class="plan-count">0</span>)</span>
+            <div class="status-btn" onclick="openPlanModal()">生成路书</div>
+        </div>
+
+        <div class="filter-group">
+            <button class="filter-btn active" onclick="filterMap('all', this)">全部</button>
+            <button class="filter-btn" data-type="museum" onclick="filterMap('museum', this)">核心展馆</button>
+            <button class="filter-btn" data-type="culture" onclick="filterMap('culture', this)">文化地标</button>
+        </div>
+        
+        <div class="scroll-content">
+            <div class="section-title"><i class="fas fa-route"></i> 研学精选路线</div>
+            
+            <div class="route-card" onclick="toggleRoute('royal', this)">
+                <div class="route-icon" style="background:var(--primary-red)"><i class="fas fa-crown"></i></div>
+                <div>
+                    <div style="font-weight:bold; font-size:15px; color:#333;">皇家贡品溯源线</div>
+                    <div style="font-size:12px; color:#666;">江宁织造 · 博物院 · 云锦所</div>
+                </div>
+            </div>
+            
+            <div class="route-card" onclick="toggleRoute('craft', this)">
+                <div class="route-icon" style="background:var(--secondary-blue)"><i class="fas fa-hands-holding-circle"></i></div>
+                <div>
+                    <div style="font-weight:bold; font-size:15px; color:#333;">非遗技艺体验线</div>
+                    <div style="font-size:12px; color:#666;">云锦博物馆 · 老门东 · 秦淮风光</div>
+                </div>
+            </div>
+
+            <div class="section-title"><i class="fas fa-map-marked-alt"></i> 云锦地标列表</div>
+            <div id="locationList"></div>
+        </div>
+    </div>
+
+    <!-- 地图 -->
+    <div class="map-container">
+        <div id="map"></div>
+        
+        <!-- 详情抽屉 -->
+        <div class="detail-panel" id="detailPanel">
+            <!-- 动态内容 -->
+        </div>
+    </div>
+
+    <!-- 路书弹窗 -->
+    <div class="modal-overlay" id="planModal">
+        <div class="modal-box">
+            <div class="plan-header">
+                <h3 style="font-size:18px; font-weight:700;"><i class="fas fa-clipboard-list"></i> 我的云锦研学路书</h3>
+                <i class="fas fa-times" style="cursor:pointer; font-size:18px; color:#94A3B8;" onclick="closePlanModal()"></i>
+            </div>
+            
+            <div class="route-stats" id="routeStats">
+                <i class="fas fa-walking"></i> 研学里程：<span id="totalDist">0</span> km<br>
+                <i class="far fa-clock"></i> 建议天数：<span id="totalTime">0</span> 天
+            </div>
+
+            <div class="plan-list" id="planListContainer"></div>
+            
+            <button class="action-btn btn-nav" onclick="generateCustomRoute()" style="width:100%;">
+                <i class="fas fa-magic"></i> 智能生成研学规划
+            </button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <script>
+        // ==========================================
+        // 0. 下载功能
+        // ==========================================
+        function downloadHTML() {
+            const htmlContent = document.documentElement.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '南京云锦研学地图_V5.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            alert("地图文件已下载！您可以直接双击打开使用。");
+        }
+
+        // ==========================================
+        // 1. 云锦深度数据
+        // ==========================================
+        const locations = [
+            {
+                id: 1, name: "南京云锦博物馆", type: "museum", district: "建邺区",
+                lat: 32.038743, lng: 118.739722, // 修正坐标近似值
+                address: "茶亭东街240号", opening: "09:00-17:00",
+                img: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Nanjing_Yunjin_Museum_Gate.jpg/1200px-Nanjing_Yunjin_Museum_Gate.jpg",
+                desc: "全国唯一的云锦专业博物馆，也是世界非物质文化遗产“南京云锦”的传承保护基地。馆内最震撼的是巨大的“大花楼木织机”，由两名织工（拽花工和织手）上下配合，至今无法被机器替代。这里展示了从战国到明清的丝织文物，还能亲眼目睹“寸锦寸金”的织造过程。",
+                quiz: { q: "云锦织造中最核心、无法被机器替代的织机叫什么？", a: 1, opts: ["蒸汽织机", "大花楼木织机", "脚踏提花机"] },
+                radar: [99, 95, 90, 100, 85] // 技艺, 历史, 美学, 价值, 互动
+            },
+            {
+                id: 2, name: "江宁织造博物馆", type: "museum", district: "玄武区",
+                lat: 32.042159, lng: 118.794082,
+                address: "长江路123号", opening: "09:00-17:30",
+                img: "https://dimg04.c-ctrip.com/images/100316000000zavizDA60_C_500_280.jpg",
+                desc: "位于清代江宁织造府遗址之上。江宁织造不仅是专门为清皇室织造御用绸缎的机构，更是《红楼梦》作者曹雪芹的家。馆内展出的“云锦天衣”系列复原了多件龙袍，结合现代建筑园林设计，完美呈现了红楼文化与丝织技艺的交融。",
+                quiz: { q: "江宁织造府与哪部中国古典名著关系密切？", a: 2, opts: ["《水浒传》", "《西游记》", "《红楼梦》"] },
+                radar: [90, 99, 95, 95, 90]
+            },
+            {
+                id: 3, name: "南京博物院(非遗馆)", type: "museum", district: "玄武区",
+                lat: 32.041004, lng: 118.825164,
+                address: "中山东路321号", opening: "09:00-17:00",
+                img: "https://p0.itc.cn/q_70/images03/20210518/c4b8e8f8045648839077051d38241477.jpeg",
+                desc: "作为中国三大博物馆之一，其非遗馆常年展示江苏各地的传统技艺。这里收藏有大量明清时期的官织珍品，能让你从更宏大的历史视角理解云锦作为“锦中之冠”在古代丝绸之路和宫廷生活中的地位。",
+                quiz: { q: "南京云锦在古代主要供谁使用？", a: 0, opts: ["皇家御用", "平民百姓", "海外出口"] },
+                radar: [80, 100, 90, 90, 70]
+            },
+            {
+                id: 4, name: "老门东历史街区", type: "culture", district: "秦淮区",
+                lat: 32.015024, lng: 118.783188,
+                address: "剪子巷63-2号", opening: "全天开放",
+                img: "https://n.ina.cn/sinacn/20171017/0122-fymvkax8005697.jpg",
+                desc: "曾经是南京手工业者聚集之地，如今不仅保留了明清风貌，还引入了多家云锦文创店和汉服体验馆。在这里，你可以购买到融入现代设计的云锦钱包、围巾，甚至体验穿着云锦纹样的汉服游览古街，感受非遗的生活化。",
+                quiz: { q: "在老门东，云锦最常见的现代转化形式是？", a: 1, opts: ["工业原料", "文创产品与服饰", "建筑材料"] },
+                radar: [60, 85, 85, 70, 95]
+            },
+            {
+                id: 5, name: "秦淮河/夫子庙", type: "culture", district: "秦淮区",
+                lat: 32.020521, lng: 118.790327,
+                address: "贡院西街", opening: "全天开放",
+                img: "https://web.archive.org/web/20220101000000/http://nanjing.gov.cn/images/2021-12/10/F202112101538392572526315.jpg", // placeholder
+                desc: "秦淮河畔曾是南京织造业最繁华的区域，所谓“秦淮八艳”与丝织业也有千丝万缕的联系。这里的店铺林立，虽然商业化较重，但依然是感受南京“锦绣金陵”繁华气象的最佳窗口。",
+                quiz: { q: "形容南京云锦色泽华丽，通常用哪个词？", a: 0, opts: ["灿若云霞", "素雅如兰", "漆黑如墨"] },
+                radar: [50, 90, 80, 80, 90]
+            }
+        ];
+
+        // 路线规划
+        const routePlans = {
+            royal: [[32.042159, 118.794082], [32.041004, 118.825164], [32.038743, 118.739722]], // 织造 -> 博物院 -> 云锦所
+            craft: [[32.038743, 118.739722], [32.015024, 118.783188], [32.020521, 118.790327]] // 云锦所 -> 老门东 -> 夫子庙
+        };
+
+        // 状态变量
+        let myPlan = new Set();
+        let activeRouteKey = null;
+        let speechUtterance = null;
+        let radarChart = null;
+
+        // ==========================================
+        // 2. 初始化地图
+        // ==========================================
+        const map = L.map('map', { center: [32.028, 118.790], zoom: 12, zoomControl: false });
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        // 使用更简洁的底图风格突出云锦地标
+        L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+            subdomains: ["1", "2", "3", "4"], minZoom: 10, maxZoom: 18
+        }).addTo(map);
+
+        const markersLayer = L.layerGroup().addTo(map);
+        let currentRouteLine = null;
+
+        function createIcon(type) {
+            const bgClass = type === 'museum' ? 'bg-museum' : 'bg-culture';
+            // 博物馆用"地标"图标，文化地标用"商店/火"图标
+            const iconClass = type === 'museum' ? 'fa-landmark' : 'fa-store';
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="custom-marker ${bgClass}" style="width:36px;height:36px;font-size:16px;"><i class="fas ${iconClass}"></i></div>`,
+                iconSize: [36, 36], iconAnchor: [18, 18], popupAnchor: [0, -20]
+            });
+        }
+
+        // ==========================================
+        // 3. 核心功能
+        // ==========================================
+        
+        function openDetail(id) {
+            const loc = locations.find(l => l.id === id);
+            if(!loc) return;
+            stopAudio();
+
+            const panel = document.getElementById('detailPanel');
+            const isAdded = myPlan.has(id);
+            
+            panel.innerHTML = `
+                <div class="detail-hero">
+                    <img src="${loc.img}" alt="${loc.name}" onerror="this.src='https://placehold.co/400x200?text=Nanjing+Yunjin'">
+                    <div class="close-btn" onclick="closeDetail()"><i class="fas fa-times"></i></div>
+                </div>
+                <div class="detail-content">
+                    <div class="title-row">
+                        <div class="detail-title">${loc.name}</div>
+                        <button class="audio-btn" onclick="toggleAudio('${loc.desc.replace(/'/g, "")}', this)">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="detail-meta">
+                        <div class="meta-tag"><i class="far fa-clock"></i> ${loc.opening}</div>
+                        <div class="meta-tag"><i class="fas fa-map-marker-alt"></i> ${loc.district}</div>
+                        <div class="meta-tag" style="color:var(--primary-red);border-color:var(--primary-red);"><i class="fas fa-tag"></i> ${loc.type==='museum'?'核心展馆':'文化体验'}</div>
+                    </div>
+
+                    <div class="detail-desc">${loc.desc}</div>
+
+                    <!-- 知识问答 -->
+                    <div class="quiz-card">
+                        <div class="quiz-title"><i class="fas fa-scroll"></i> 非遗挑战：${loc.quiz.q}</div>
+                        <div class="quiz-options">
+                            ${loc.quiz.opts.map((opt, idx) => `
+                                <div class="quiz-opt" onclick="checkAnswer(this, ${idx}, ${loc.quiz.a})">${opt}</div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px; color:#333;">📊 云锦综合指数</div>
+                    <div id="radarChart" class="chart-box"></div>
+                </div>
+                <div class="detail-actions">
+                    <button class="action-btn btn-add ${isAdded?'added':''}" onclick="togglePlan(${loc.id}, this)">
+                        <i class="fas ${isAdded?'fa-check':'fa-plus'}"></i> ${isAdded?'已收藏':'加入行程'}
+                    </button>
+                    <a href="https://uri.amap.com/marker?position=${loc.lng},${loc.lat}&name=${loc.name}" target="_blank" class="action-btn btn-nav">
+                        <i class="fas fa-location-arrow"></i> 导航前往
+                    </a>
+                </div>
+            `;
+
+            panel.classList.add('active');
+            initRadar(loc.radar);
+            
+            if(window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+        }
+
+        function closeDetail() {
+            document.getElementById('detailPanel').classList.remove('active');
+            stopAudio();
+        }
+
+        // --- 语音导览 ---
+        function toggleAudio(text, btn) {
+            if (speechUtterance) {
+                stopAudio();
+                btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+                btn.classList.remove('playing');
+            } else {
+                speechUtterance = new SpeechSynthesisUtterance(text);
+                speechUtterance.lang = 'zh-CN';
+                speechUtterance.rate = 1.0;
+                speechUtterance.onend = () => {
+                    btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+                    btn.classList.remove('playing');
+                    speechUtterance = null;
+                };
+                window.speechSynthesis.speak(speechUtterance);
+                btn.innerHTML = '<i class="fas fa-stop"></i>';
+                btn.classList.add('playing');
+            }
+        }
+        function stopAudio() {
+            if(window.speechSynthesis) window.speechSynthesis.cancel();
+            speechUtterance = null;
+        }
+
+        // --- 知识答题 ---
+        function checkAnswer(el, choice, correct) {
+            if (el.classList.contains('correct') || el.classList.contains('wrong')) return; 
+            
+            if (choice === correct) {
+                el.classList.add('correct');
+                el.innerHTML += ' <i class="fas fa-check"></i>';
+                // 金色撒花特效
+                confetti({ 
+                    particleCount: 120, 
+                    spread: 80, 
+                    origin: { y: 0.6 },
+                    colors: ['#D4AF37', '#A91D32', '#ffffff'] // 金、红、白
+                });
+            } else {
+                el.classList.add('wrong');
+                el.innerHTML += ' <i class="fas fa-times"></i>';
+            }
+        }
+
+        // --- 雷达图 ---
+        function initRadar(data) {
+            if (radarChart) radarChart.dispose();
+            radarChart = echarts.init(document.getElementById('radarChart'));
+            radarChart.setOption({
+                radar: {
+                    indicator: [
+                        {name:'技艺',max:100}, 
+                        {name:'历史',max:100}, 
+                        {name:'美学',max:100}, 
+                        {name:'价值',max:100}, 
+                        {name:'互动',max:100}
+                    ],
+                    radius: '70%', 
+                    splitNumber: 4, 
+                    axisName: { color: '#8B4513', fontWeight: 'bold' },
+                    splitLine: { lineStyle: { color: 'rgba(212, 175, 55, 0.4)' } }, // 金色分割线
+                    splitArea: { areaStyle: { color: ['rgba(255,251,235,0.1)', 'rgba(255,251,235,0.3)'] } }
+                },
+                series: [{
+                    type: 'radar',
+                    data: [{
+                        value: data,
+                        areaStyle: { color: 'rgba(169, 29, 50, 0.4)' }, // 红色填充
+                        itemStyle: { color: '#A91D32' },
+                        lineStyle: { color: '#A91D32', width: 2 }
+                    }]
+                }]
+            });
+        }
+
+        // ==========================================
+        // 4. 路线与路书功能
+        // ==========================================
+
+        function toggleRoute(key, btn) {
+            if (activeRouteKey === key) {
+                if(currentRouteLine) map.removeLayer(currentRouteLine);
+                btn.classList.remove('active-route');
+                activeRouteKey = null;
+                return;
+            }
+            if(currentRouteLine) map.removeLayer(currentRouteLine);
+            document.querySelectorAll('.route-card').forEach(c => c.classList.remove('active-route'));
+            
+            btn.classList.add('active-route');
+            activeRouteKey = key;
+
+            const path = routePlans[key];
+            const color = key === 'royal' ? '#A91D32' : '#1E3A8A';
+            drawPolyline(path, color);
+        }
+
+        function drawPolyline(points, color) {
+            currentRouteLine = L.polyline(points, {
+                color: color, weight: 6, opacity: 0.9, lineCap: 'round', dashArray: '10, 10'
+            }).addTo(map);
+            map.fitBounds(currentRouteLine.getBounds(), { padding: [50, 50] });
+        }
+
+        // --- 路书逻辑 ---
+        function togglePlan(id, btn) {
+            if(myPlan.has(id)) {
+                myPlan.delete(id);
+                if(btn) { btn.classList.remove('added'); btn.innerHTML = '<i class="fas fa-plus"></i> 加入行程'; }
+            } else {
+                myPlan.add(id);
+                if(btn) { btn.classList.add('added'); btn.innerHTML = '<i class="fas fa-check"></i> 已收藏'; }
+            }
+            document.querySelector('.plan-count').innerText = myPlan.size;
+        }
+
+        function openPlanModal() {
+            const container = document.getElementById('planListContainer');
+            container.innerHTML = '';
+            document.getElementById('routeStats').style.display = 'none';
+
+            if(myPlan.size === 0) {
+                container.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">暂无地点，请先在地图中选择</div>';
+            } else {
+                myPlan.forEach(id => {
+                    const loc = locations.find(l => l.id === id);
+                    if(loc) {
+                        const div = document.createElement('div');
+                        div.className = 'plan-item';
+                        div.innerHTML = `<span style="font-weight:bold;color:#333;">${loc.name}</span><i class="fas fa-trash-alt" style="color:#CBD5E1;cursor:pointer;" onclick="removeFromPlan(${id})"></i>`;
+                        container.appendChild(div);
+                    }
+                });
+            }
+            document.getElementById('planModal').style.display = 'flex';
+        }
+
+        function closePlanModal() { document.getElementById('planModal').style.display = 'none'; }
+        
+        function removeFromPlan(id) {
+            myPlan.delete(id);
+            openPlanModal();
+            document.querySelector('.plan-count').innerText = myPlan.size;
+            const detailBtn = document.querySelector('.btn-add');
+            if(detailBtn && document.querySelector('.detail-title') && document.querySelector('.detail-title').innerText === locations.find(l=>l.id===id).name) {
+                detailBtn.classList.remove('added'); detailBtn.innerHTML = '<i class="fas fa-plus"></i> 加入行程';
+            }
+        }
+
+        function generateCustomRoute() {
+            if(myPlan.size < 2) { alert("请至少添加 2 个地点才能生成路线！"); return; }
+            
+            const points = [];
+            myPlan.forEach(id => {
+                const loc = locations.find(l => l.id === id);
+                if(loc) points.push([loc.lat, loc.lng]);
+            });
+
+            let totalDist = 0;
+            for(let i=0; i<points.length-1; i++) {
+                totalDist += map.distance(points[i], points[i+1]);
+            }
+            totalDist = (totalDist / 1000).toFixed(1); 
+
+            document.getElementById('totalDist').innerText = totalDist;
+            document.getElementById('totalTime').innerText = Math.ceil(myPlan.size * 0.3); // 0.3天一个点
+            document.getElementById('routeStats').style.display = 'block';
+
+            closePlanModal();
+            closeDetail();
+            if(currentRouteLine) map.removeLayer(currentRouteLine);
+            document.querySelectorAll('.route-card').forEach(c => c.classList.remove('active-route'));
+            drawPolyline(points, '#D4AF37'); // 定制路线用金色
+            alert(`锦绣路线生成成功！全程约 ${totalDist} 公里。`);
+        }
+
+        // ==========================================
+        // 5. 渲染列表
+        // ==========================================
+        function renderMarkers(filterType) {
+            markersLayer.clearLayers();
+            const listDiv = document.getElementById('locationList');
+            listDiv.innerHTML = '';
+
+            locations.forEach(loc => {
+                if (filterType !== 'all' && loc.type !== filterType) return;
+                
+                const marker = L.marker([loc.lat, loc.lng], {
+                    icon: createIcon(loc.type), title: loc.name
+                });
+                marker.on('click', () => { map.setView([loc.lat, loc.lng], 15); openDetail(loc.id); });
+                markersLayer.addLayer(marker);
+
+                const item = document.createElement('div');
+                item.className = 'location-item';
+                item.innerHTML = `<span class="loc-name">${loc.name}</span><span class="loc-tag" style="background:${loc.type==='museum'?'var(--primary-red)':'var(--secondary-blue)'}">${loc.type==='museum'?'展馆':'文化'}</span>`;
+                item.onclick = () => { map.setView([loc.lat, loc.lng], 15); openDetail(loc.id); };
+                listDiv.appendChild(item);
+            });
+        }
+
+        function filterMap(type, btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderMarkers(type);
+        }
+
+        renderMarkers('all');
+        window.addEventListener('resize', () => { if(radarChart) radarChart.resize(); });
+    </script>
+</body>
+</html>
